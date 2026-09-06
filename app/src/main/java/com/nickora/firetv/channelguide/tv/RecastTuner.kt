@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.tv.TvContract
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -22,10 +23,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * Device reality (Fire TV Cube Recast):
  * - Digit entry (`input text` / digit keyevents) does NOT reliably tune; it often pauses Live TV.
- * - `input keyevent 166` (CHANNEL_UP) and `167` (CHANNEL_DOWN) DO change Recast channels.
- * - Primary UX: bring Live TV forward, then send Ch+/Ch− after a short delay.
- * - Optional TvContract VIEW when a system channel id is visible (usually empty for 3P apps).
- * - Experimental digit-entry path exists but is disabled by default.
+ * - `input keyevent 166` / `167` (Ch+/Ch−) DO change Recast channels (interim).
+ * - `livetv://tuneByChannelNumber` requires signature|privileged TUNE_CHANNEL (blocked for 3P).
+ * - Promising 3P paths:
+ *   1) VIEW `content://android.media.tv/displayNumber/{n}` → TvChannelsPlayerActivityAlias
+ *   2) Broadcast `userinput.channelnumber` after holding STATION_NUMBER_RECEIVER (normal)
+ * - TvContract channel query often returns 0 rows for 3P apps on Recast.
  */
 class RecastTuner(private val context: Context) {
 
@@ -134,7 +137,6 @@ class RecastTuner(private val context: Context) {
                 return@withContext LoadResult(0, emptyList(), lastError)
             }
 
-            // Prefer Recast/Hedwig mappings; fill gaps from any browsable channel.
             val mergedNumbers = LinkedHashMap<String, Long>()
             mergedNumbers.putAll(anyByNumber)
             mergedNumbers.putAll(hedwigByNumber)
@@ -172,23 +174,32 @@ class RecastTuner(private val context: Context) {
     }
 
     /**
-     * Program select / legacy Tune: prefer TvContract VIEW when a system id matches;
-     * otherwise bring Live TV forward and best-effort CHANNEL_UP once.
+     * Program select / Tune:
+     * 1) TvContract channel id VIEW when mapped
+     * 2) Amazon displayNumber content URI
+     * 3) Station-number broadcast (normal permission)
+     * 4) Ch+ interim fallback
      *
-     * Direct numeric tune is not reliable on Recast (digit entry pauses Live TV).
-     *
-     * @return true if a TvContract channel VIEW was started; false if Ch+ path ran
+     * @return true if a direct VIEW/broadcast path was attempted without Ch+ fallback
      */
     fun tune(channel: Channel): Boolean {
         val systemId = resolveSystemChannelId(channel)
         if (systemId != null) {
-            return try {
+            try {
                 startLiveTv(systemId)
-                true
+                return true
             } catch (t: Throwable) {
-                Log.e(TAG, "Failed to start Live TV for channelId=$systemId; falling back to Ch+", t)
-                stepChannel(ChannelStep.UP)
-                false
+                Log.e(TAG, "Failed channelId VIEW; trying number tune", t)
+            }
+        }
+
+        val entry = channelEntryNumber(channel)
+        if (entry != null) {
+            val byDisplay = tuneByDisplayNumberUri(entry)
+            val byBroadcast = sendStationNumberBroadcast(entry)
+            if (byDisplay || byBroadcast) {
+                Log.i(TAG, "Number tune attempted displayUri=$byDisplay broadcast=$byBroadcast entry=$entry")
+                return true
             }
         }
 
@@ -213,6 +224,67 @@ class RecastTuner(private val context: Context) {
 
     /** Bring Live TV forward, wait briefly, then send CHANNEL_DOWN (167). */
     fun channelDown() = stepChannel(ChannelStep.DOWN)
+
+    /**
+     * Amazon-extended TvContract path:
+     * `content://android.media.tv/displayNumber/{major.minor}`
+     * Resolves to TvChannelsPlayerActivityAlias without TUNE_CHANNEL.
+     */
+    private fun tuneByDisplayNumberUri(entry: String): Boolean {
+        val safe = sanitizeChannelDigits(entry) ?: return false
+        val uri = Uri.parse("content://android.media.tv/displayNumber/$safe")
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                if (isLiveTvAliasResolvable()) {
+                    component = ComponentName(LIVE_TV_PACKAGE, LIVE_TV_ACTIVITY)
+                }
+            }
+            context.startActivity(intent)
+            Log.i(TAG, "Started displayNumber VIEW $uri")
+            true
+        } catch (t: Throwable) {
+            Log.e(TAG, "displayNumber VIEW failed for $uri", t)
+            try {
+                val implicit = Intent(Intent.ACTION_VIEW, uri).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(implicit)
+                Log.i(TAG, "Started implicit displayNumber VIEW $uri")
+                true
+            } catch (t2: Throwable) {
+                Log.e(TAG, "implicit displayNumber VIEW failed", t2)
+                false
+            }
+        }
+    }
+
+    /**
+     * Live TV StationNumberReceiver (permission STATION_NUMBER_RECEIVER is normal).
+     * Extra key is not fully confirmed; send common candidates.
+     */
+    private fun sendStationNumberBroadcast(entry: String): Boolean {
+        val safe = sanitizeChannelDigits(entry) ?: return false
+        return try {
+            val intent = Intent(STATION_NUMBER_ACTION).apply {
+                setPackage(LIVE_TV_PACKAGE)
+                component = ComponentName(LIVE_TV_PACKAGE, STATION_NUMBER_RECEIVER)
+                putExtra("EXTRA_CHANNEL_NUMBER", safe)
+                putExtra("CHANNEL_NUMBER", safe)
+                putExtra("channelNumber", safe)
+                putExtra("channel_number", safe)
+                putExtra("displayNumber", safe)
+                putExtra("mChannelNumber", safe)
+                putExtra("stationNumber", safe)
+            }
+            context.sendBroadcast(intent)
+            Log.i(TAG, "Sent station-number broadcast for $safe")
+            true
+        } catch (t: Throwable) {
+            Log.e(TAG, "station-number broadcast failed", t)
+            false
+        }
+    }
 
     private fun stepChannel(step: ChannelStep) {
         try {
@@ -255,10 +327,7 @@ class RecastTuner(private val context: Context) {
         }, CHANNEL_STEP_DELAY_MS)
     }
 
-    /**
-     * Preferred Live TV entry form: dotted major.minor (e.g. `4.1`, `15-1` → `15.1`).
-     * Kept for experimental digit-entry path only.
-     */
+    /** Preferred Live TV entry form: dotted major.minor (e.g. `4.1`, `15-1` → `15.1`). */
     fun channelEntryNumber(channel: Channel): String? {
         val raw = channel.number.trim()
             .replace('\u2013', '-')
@@ -278,10 +347,6 @@ class RecastTuner(private val context: Context) {
         return raw
     }
 
-    /**
-     * Experimental / disabled by default. Digit entry pauses Live TV on Recast Cube;
-     * do not use as primary tune path.
-     */
     private fun tuneViaDigitEntry(channel: Channel) {
         if (!ENABLE_EXPERIMENTAL_DIGIT_ENTRY) return
 
@@ -405,7 +470,6 @@ class RecastTuner(private val context: Context) {
         Log.i(TAG, "Started Live TV VIEW for $uri component=${intent.component}")
     }
 
-    /** Open Live TV player with ACTION_VIEW (no channel URI). */
     private fun launchLiveTvPlayer() {
         try {
             if (isLiveTvAliasResolvable()) {
@@ -445,29 +509,22 @@ class RecastTuner(private val context: Context) {
         private const val TAG = "RecastTuner"
         private const val LIVE_TV_PACKAGE = "com.amazon.tv.livetv"
         private const val LIVE_TV_ACTIVITY = "com.amazon.tv.livetv.TvChannelsPlayerActivityAlias"
+        private const val STATION_NUMBER_RECEIVER = "com.amazon.tv.livetv.StationNumberReceiver"
+        private const val STATION_NUMBER_ACTION =
+            "com.amazon.tv.livetv.intent.action.userinput.channelnumber"
         private const val HEDWIG_HINT = "hedwig"
 
-        /** Android KeyEvent.KEYCODE_CHANNEL_UP */
         private const val KEYCODE_CHANNEL_UP = 166
-        /** Android KeyEvent.KEYCODE_CHANNEL_DOWN */
         private const val KEYCODE_CHANNEL_DOWN = 167
 
-        /** Wait for Live TV to come forward before Ch+/Ch− (~500–800ms). */
         private const val CHANNEL_STEP_DELAY_MS = 650L
-
-        /** Experimental digit path only (disabled). */
         private const val DIGIT_ENTRY_DELAY_MS = 2000L
 
-        /**
-         * Digit entry (`input text`) pauses Live TV on Recast Cube and does not tune.
-         * Leave off unless experimenting with an alternate device.
-         */
         const val ENABLE_EXPERIMENTAL_DIGIT_ENTRY = false
 
-        /** Normalize "4.1", "4-1", "04.1" → comparable key. */
         fun normalizeNumber(raw: String): String {
             val cleaned = raw.trim()
-                .replace('\u2013', '-') // en-dash
+                .replace('\u2013', '-')
                 .replace('\u2014', '-')
                 .replace('–', '-')
                 .replace('—', '-')

@@ -9,8 +9,9 @@ import kotlin.random.Random
 
 /**
  * Generates sample OTA-style EPG relative to "now".
- * Leads with confirmed Recast channels 2.1 / 2.2; other rows are generic OTA placeholders.
- * ~10 channels × ~10 days of half-hour / hour blocks.
+ * Channel numbers / call signs: Twin Cities DMA for ZIP 54002 (Baldwin, WI).
+ * Program titles are still placeholders until Schedules Direct / XMLTV.
+ * ~20 channels × ~14 days forward (no past) of half-hour / hour blocks.
  */
 object SampleEpgData {
 
@@ -18,8 +19,9 @@ object SampleEpgData {
     private val HOUR = TimeUnit.HOURS.toMillis(1)
     private val DAY = TimeUnit.DAYS.toMillis(1)
 
-    fun build(nowMs: Long = System.currentTimeMillis(), days: Int = 10): EpgGuide {
-        val windowStart = alignDown(nowMs - DAY, HALF_HOUR) // include yesterday
+    fun build(nowMs: Long = System.currentTimeMillis(), days: Int = 14): EpgGuide {
+        // No past listings — classic forward guide from the current half-hour
+        val windowStart = alignDown(nowMs, HALF_HOUR)
         val windowEnd = windowStart + days * DAY
 
         val channels = sampleChannels()
@@ -46,7 +48,7 @@ object SampleEpgData {
                         id = "p$progSeq-${channel.id}",
                         channelId = channel.id,
                         title = title,
-                        description = template.description.replace("{title}", title),
+                        description = "[Sample listing] " + template.description.replace("{title}", title),
                         startEpochMs = cursor,
                         endEpochMs = end,
                         rating = template.rating,
@@ -70,50 +72,65 @@ object SampleEpgData {
     }
 
     /**
-     * Confirmed on-device Recast: 2.1 and 2.2 first.
-     * Remaining rows are generic OTA placeholders (not tied to a specific DMA).
+     * Twin Cities (MSP) OTA for ZIP 54002.
+     * Confirmed on Nick's Recast: 2.1 / 2.2. Other virtuals from MSP DMA lineup;
+     * Recast may omit some subchannels — correct after a live pass.
      */
     private fun sampleChannels(): List<Channel> = listOf(
-        Channel(
-            "ch-21", "2.1", "PBS", "Channel 2.1", "PBS",
-            favorite = true, categories = setOf("Kids", "TV Shows", "Movies")
-        ),
-        Channel(
-            "ch-22", "2.2", "CREATE", "Channel 2.2", "PBS",
-            favorite = true, categories = setOf("TV Shows")
-        ),
-        Channel(
-            "ch-41", "4.1", "CBS", "Channel 4.1", "CBS",
-            favorite = true, categories = setOf("News", "Sports", "TV Shows")
-        ),
-        Channel(
-            "ch-51", "5.1", "ABC", "Channel 5.1", "ABC",
-            favorite = true, categories = setOf("News", "TV Shows")
-        ),
-        Channel(
-            "ch-91", "9.1", "FOX", "Channel 9.1", "FOX",
-            favorite = true, categories = setOf("News", "Sports", "TV Shows")
-        ),
-        Channel(
-            "ch-111", "11.1", "NBC", "Channel 11.1", "NBC",
-            favorite = true, categories = setOf("News", "Sports", "TV Shows")
-        ),
-        Channel(
-            "ch-23", "2.3", "PBSK", "Channel 2.3", "PBS Kids",
-            favorite = false, categories = setOf("Kids")
-        ),
-        Channel(
-            "ch-42", "4.2", "COZI", "Channel 4.2", "Cozi",
-            favorite = false, categories = setOf("TV Shows", "Movies")
-        ),
-        Channel(
-            "ch-231", "23.1", "CW", "Channel 23.1", "CW",
-            favorite = false, categories = setOf("TV Shows", "Sports")
-        ),
-        Channel(
-            "ch-451", "45.1", "ION", "Channel 45.1", "ION",
-            favorite = false, categories = setOf("TV Shows", "Movies")
-        )
+        // TPT / PBS (KTCA / KTCI) — confirmed on Recast
+        Channel("ch-21", "2.1", "TPT2", "TPT 2", "PBS",
+            favorite = true, categories = setOf("Kids", "TV Shows", "Movies")),
+        Channel("ch-22", "2.2", "TPTMN", "Minnesota Channel", "PBS",
+            favorite = true, categories = setOf("TV Shows")),
+        Channel("ch-23", "2.3", "TPTLIFE", "TPT Life", "PBS",
+            favorite = false, categories = setOf("TV Shows")),
+        Channel("ch-24", "2.4", "TPTKIDS", "PBS Kids", "PBS Kids",
+            favorite = false, categories = setOf("Kids")),
+        Channel("ch-25", "2.5", "TPTNOW", "TPT Now / Weather", "Weather",
+            favorite = false, categories = setOf("News")),
+        // WCCO CBS
+        Channel("ch-41", "4.1", "WCCO", "WCCO 4", "CBS",
+            favorite = true, categories = setOf("News", "Sports", "TV Shows")),
+        Channel("ch-42", "4.2", "START", "Start TV", "Start TV",
+            favorite = false, categories = setOf("TV Shows", "Movies")),
+        Channel("ch-43", "4.3", "DABL", "Dabl", "Dabl",
+            favorite = false, categories = setOf("TV Shows")),
+        Channel("ch-44", "4.4", "FAVE", "Fave TV", "Fave TV",
+            favorite = false, categories = setOf("TV Shows")),
+        // KSTP ABC + KSTC subs often under 5.x
+        Channel("ch-51", "5.1", "KSTP", "KSTP 5", "ABC",
+            favorite = true, categories = setOf("News", "TV Shows")),
+        Channel("ch-52", "5.2", "45TV", "45TV", "Independent",
+            favorite = false, categories = setOf("TV Shows", "Movies")),
+        Channel("ch-53", "5.3", "METV", "MeTV", "MeTV",
+            favorite = false, categories = setOf("TV Shows", "Movies")),
+        Channel("ch-54", "5.4", "GETTV", "getTV", "getTV",
+            favorite = false, categories = setOf("TV Shows", "Movies")),
+        Channel("ch-55", "5.5", "DEFY", "Defy TV", "Defy",
+            favorite = false, categories = setOf("TV Shows")),
+        Channel("ch-57", "5.7", "HI", "Heroes & Icons", "H&I",
+            favorite = false, categories = setOf("TV Shows", "Movies")),
+        // FOX / MyNet cluster
+        Channel("ch-91", "9.1", "KMSP", "FOX 9", "FOX",
+            favorite = true, categories = setOf("News", "Sports", "TV Shows")),
+        Channel("ch-92", "9.2", "WFTC", "FOX 9+", "MyNetwork",
+            favorite = false, categories = setOf("TV Shows", "Sports")),
+        // KARE NBC
+        Channel("ch-111", "11.1", "KARE", "KARE 11", "NBC",
+            favorite = true, categories = setOf("News", "Sports", "TV Shows")),
+        Channel("ch-112", "11.2", "COURT", "Court TV", "Court TV",
+            favorite = false, categories = setOf("TV Shows")),
+        Channel("ch-113", "11.3", "TRUE", "True Crime Network", "True Crime",
+            favorite = false, categories = setOf("TV Shows")),
+        // CW + Ion
+        Channel("ch-231", "23.1", "WUCW", "The CW Twin Cities", "CW",
+            favorite = true, categories = setOf("TV Shows", "Sports")),
+        Channel("ch-232", "23.2", "COMET", "Comet", "Comet",
+            favorite = false, categories = setOf("Movies", "TV Shows")),
+        Channel("ch-411", "41.1", "KPXM", "ION", "ION",
+            favorite = false, categories = setOf("TV Shows", "Movies")),
+        Channel("ch-412", "41.2", "BOUNCE", "Bounce", "Bounce",
+            favorite = false, categories = setOf("TV Shows", "Movies"))
     )
 
     private data class Template(
@@ -203,13 +220,16 @@ object SampleEpgData {
         )
 
         return when (channel.network) {
-            "CBS", "ABC", "NBC", "FOX" -> listOf(news, news, drama, comedy, sports, paid, movie)
-            "PBS" -> if (channel.id == "ch-22") listOf(lifestyle, lifestyle, paid)
+            "CBS", "ABC", "NBC", "FOX", "MyNetwork" ->
+                listOf(news, news, drama, comedy, sports, paid, movie)
+            "PBS" -> if (channel.id == "ch-22") listOf(lifestyle, lifestyle, pbsDoc, paid)
             else listOf(pbsDoc, kids, news, lifestyle, movie)
             "PBS Kids" -> listOf(kids, kids, kids)
             "Weather" -> listOf(weather)
             "CW" -> listOf(drama, comedy, sports, paid)
-            "ION", "Bounce", "Cozi" -> listOf(drama, movie, comedy, paid)
+            "ION", "Bounce", "MeTV", "getTV", "Start TV", "Dabl", "Fave TV",
+            "H&I", "Defy", "Independent", "Comet", "Court TV", "True Crime" ->
+                listOf(drama, movie, comedy, paid)
             else -> listOf(drama, comedy, paid, news)
         }
     }

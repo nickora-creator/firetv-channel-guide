@@ -56,6 +56,8 @@ class EpgGuideView @JvmOverloads constructor(
 
     private var scrollXpx = 0f
     private var scrollYpx = 0f
+    /** Re-run scrollToNow once we have a real width (setGuide often runs pre-layout). */
+    private var pendingScrollToNow = false
 
     private var focusRow = 0
     private var focusProgramId: String? = null
@@ -126,6 +128,7 @@ class EpgGuideView @JvmOverloads constructor(
         focusRow = 0
         focusNearestToNow()
         // Scroll so "now" is visible with a little past context
+        pendingScrollToNow = true
         scrollToNow()
         invalidate()
         notifyFocus()
@@ -185,11 +188,72 @@ class EpgGuideView @JvmOverloads constructor(
         listener?.onProgramFocused(ch, findFocusedProgram(ch))
     }
 
+    private fun contentXForTime(epochMs: Long): Float {
+        val g = guide ?: return 0f
+        val minutes = SampleEpgData.minutesBetween(g.windowStartMs, epochMs)
+        return minutesToWidth(minutes)
+    }
+
+    /**
+     * Put the now-line ~1 slot after the channel column so current shows are on-screen.
+     * Uses absolute content X (not timeToX, which is screen-relative and subtracts scroll).
+     */
     private fun scrollToNow() {
+        if (width <= 0) {
+            pendingScrollToNow = true
+            return
+        }
         val now = System.currentTimeMillis()
-        val x = timeToX(now) - channelColWidth - slotWidthPx
-        scrollXpx = x.coerceIn(0f, maxScrollX())
-        ensureFocusVisible()
+        lastNowMs = now
+        // Show a little of the past (~30 min), then now
+        val target = contentXForTime(now) - slotWidthPx
+        scrollXpx = target.coerceIn(0f, maxScrollX())
+        // Keep the focused (current) tile visible without jumping to its end/future
+        ensureCurrentProgramVisible()
+        pendingScrollToNow = false
+    }
+
+    /** Like ensureFocusVisible, but prefer keeping "now" in view for airing programs. */
+    private fun ensureCurrentProgramVisible() {
+        val ch = filteredChannels.getOrNull(focusRow) ?: return
+        val program = findFocusedProgram(ch) ?: return
+        val g = guide ?: return
+        val now = lastNowMs
+
+        // Vertical
+        val rowTop = focusRow * rowHeight
+        val rowBottom = rowTop + rowHeight
+        val visibleTop = scrollYpx
+        val visibleBottom = scrollYpx + (height - timeHeaderHeight)
+        if (rowTop < visibleTop) {
+            scrollYpx = rowTop
+        } else if (rowBottom > visibleBottom) {
+            scrollYpx = rowBottom - (height - timeHeaderHeight)
+        }
+        scrollYpx = scrollYpx.coerceIn(0f, maxScrollY())
+
+        val gridW = (width - channelColWidth).coerceAtLeast(1f)
+        val leftAbs = contentXForTime(program.startEpochMs)
+        val rightAbs = leftAbs + programWidth(program)
+        val nowAbs = contentXForTime(now)
+
+        if (program.startEpochMs <= now && now < program.endEpochMs) {
+            // Currently airing: keep now on-screen (don't scroll to program end)
+            val visibleLeft = scrollXpx
+            val visibleRight = scrollXpx + gridW
+            if (nowAbs < visibleLeft + slotWidthPx * 0.25f || nowAbs > visibleRight - slotWidthPx * 0.25f) {
+                scrollXpx = (nowAbs - slotWidthPx).coerceIn(0f, maxScrollX())
+            }
+        } else {
+            val visibleLeft = scrollXpx
+            val visibleRight = scrollXpx + gridW
+            if (leftAbs < visibleLeft) {
+                scrollXpx = leftAbs
+            } else if (rightAbs > visibleRight) {
+                scrollXpx = rightAbs - gridW
+            }
+            scrollXpx = scrollXpx.coerceIn(0f, maxScrollX())
+        }
     }
 
     private fun maxScrollX(): Float {
@@ -510,8 +574,13 @@ class EpgGuideView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        scrollXpx = scrollXpx.coerceIn(0f, maxScrollX())
-        scrollYpx = scrollYpx.coerceIn(0f, maxScrollY())
+        if (pendingScrollToNow || (oldw == 0 && w > 0 && guide != null)) {
+            scrollToNow()
+        } else {
+            scrollXpx = scrollXpx.coerceIn(0f, maxScrollX())
+            scrollYpx = scrollYpx.coerceIn(0f, maxScrollY())
+        }
+        invalidate()
     }
 
     private fun dp(value: Float): Float =

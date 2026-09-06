@@ -1,9 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Network: download published MSP EPG JSON from GitHub -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Exact-ish daily 2am America/Chicago EPG refresh -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
     <!-- Required to query TvContract.Channels for Recast / Live TV tuning -->
     <uses-permission android:name="android.permission.READ_TV_LISTINGS" />
     <uses-permission android:name="com.android.providers.tv.permission.READ_EPG_DATA" />
+    <!-- Normal permission: lets us send channel-number broadcasts to Live TV -->
+    <uses-permission android:name="com.amazon.tv.livetv.permission.STATION_NUMBER_RECEIVER" />
 
     <uses-feature
         android:name="android.software.leanback"
@@ -32,5 +41,21 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <receiver
+            android:name=".work.EpgRefreshAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.nickora.firetv.channelguide.action.EPG_REFRESH_ALARM" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".work.EpgBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

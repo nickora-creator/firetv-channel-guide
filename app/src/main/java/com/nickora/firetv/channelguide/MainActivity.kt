@@ -13,10 +13,12 @@ import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.nickora.firetv.channelguide.data.Channel
+import com.nickora.firetv.channelguide.data.EpgRepository
 import com.nickora.firetv.channelguide.data.Program
 import com.nickora.firetv.channelguide.data.SampleEpgData
 import com.nickora.firetv.channelguide.tv.RecastTuner
 import com.nickora.firetv.channelguide.ui.EpgGuideView
+import com.nickora.firetv.channelguide.work.EpgRefreshScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -24,7 +26,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Classic Fire TV Recast-style channel guide (sample EPG + Live TV Ch+/Ch−).
+ * Classic Fire TV Recast-style channel guide (MSP EPG + Live TV Ch+/Ch−).
  */
 class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
 
@@ -62,10 +64,22 @@ class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
         wireActions()
         loadSystemChannels()
 
-        val guide = SampleEpgData.build(days = 10)
         epgGuide.listener = this
-        epgGuide.setGuide(guide)
+        // Show sample immediately, then swap in cached/remote MSP feed
+        epgGuide.setGuide(SampleEpgData.build(days = 14))
         epgGuide.requestFocus()
+
+        EpgRefreshScheduler.scheduleNext(this)
+        loadEpgGuide()
+    }
+
+    private fun loadEpgGuide(forceRefresh: Boolean = false) {
+        activityScope.launch {
+            val repo = EpgRepository(applicationContext)
+            val guide = repo.loadGuide(forceRefresh = forceRefresh)
+            epgGuide.setGuide(guide)
+            Log.i(TAG, "Guide loaded: channels=${guide.channels.size} programs=${guide.programs.size}")
+        }
     }
 
     override fun onDestroy() {
