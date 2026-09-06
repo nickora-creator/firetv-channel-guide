@@ -45,6 +45,17 @@ class EpgRepository(private val context: Context) {
             }
         }
 
+        // Bundled asset shipped with the APK (may be a day behind remote)
+        try {
+            val asset = context.assets.open(CACHE_NAME).bufferedReader(Charsets.UTF_8).use { it.readText() }
+            parseGuide(asset)?.let { guide ->
+                Log.i(TAG, "Loaded EPG from APK assets")
+                return@withContext guide.withFreshWindow(now)
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "Asset EPG unavailable: ${t.message}")
+        }
+
         Log.i(TAG, "Using SampleEpgData fallback")
         SampleEpgData.build(nowMs = now, days = 14)
     }
@@ -75,7 +86,20 @@ class EpgRepository(private val context: Context) {
     }
 
     private fun downloadRemote(): String {
-        val conn = (URL(REMOTE_URL).openConnection() as HttpURLConnection).apply {
+        var lastError: Throwable? = null
+        for (url in REMOTE_URLS) {
+            try {
+                return downloadUrl(url)
+            } catch (t: Throwable) {
+                Log.w(TAG, "Download failed for $url: ${t.message}")
+                lastError = t
+            }
+        }
+        throw lastError ?: IllegalStateException("No remote EPG URLs configured")
+    }
+
+    private fun downloadUrl(url: String): String {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000
             readTimeout = 60_000
             requestMethod = "GET"
@@ -164,6 +188,11 @@ class EpgRepository(private val context: Context) {
         const val CACHE_NAME = "msp-epg.json"
         const val REMOTE_URL =
             "https://raw.githubusercontent.com/nickora-creator/firetv-channel-guide/main/epg/msp-epg.json"
+        private val REMOTE_URLS = listOf(
+            REMOTE_URL,
+            // jsDelivr mirrors public GitHub content (helps when raw.githubusercontent CDN lags)
+            "https://cdn.jsdelivr.net/gh/nickora-creator/firetv-channel-guide@main/epg/msp-epg.json"
+        )
         private val STALE_AFTER_MS = TimeUnit.HOURS.toMillis(20)
         private val HALF_HOUR_MS = TimeUnit.MINUTES.toMillis(30)
     }
