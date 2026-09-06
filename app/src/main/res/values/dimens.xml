@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="channel_column_width">140dp</dimen>
+    <dimen name="channel_row_height">56dp</dimen>
+    <dimen name="time_header_height">36dp</dimen>
+    <dimen name="minutes_per_slot">30</dimen>
+    <!-- px-equivalent width for 30 minutes at density 1; scaled in code via dp -->
+    <dimen name="slot_width">180dp</dimen>
+    <dimen name="detail_panel_height">160dp</dimen>
+    <dimen name="filter_bar_height">48dp</dimen>
+    <dimen name="program_gap">2dp</dimen>
+    <dimen name="tile_corner">8dp</dimen>
+</resources>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.FireTvChannelGuide" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@color/epg_background</item>
+        <item name="android:colorBackground">@color/epg_background</item>
+        <item name="android:textColorPrimary">@color/epg_text_primary</item>
+        <item name="android:textColorSecondary">@color/epg_text_secondary</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="colorPrimary">@color/epg_now_line</item>
+        <item name="colorAccent">@color/epg_accent_blue</item>
+    </style>
+</resources>

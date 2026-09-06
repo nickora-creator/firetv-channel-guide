@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Channel Guide</string>
+    <string name="recast_badge">Fire TV Recast</string>
+    <string name="tune">Tune</string>
+    <string name="record">Record</string>
+    <string name="tune_stub">Tune (stub): %1$s on %2$s</string>
+    <string name="record_stub">Record (stub): %1$s</string>
+    <string name="no_program">No program</string>
+    <string name="filter_all">All</string>
+    <string name="filter_favorites">Favorites</string>
+    <string name="filter_sports">Sports</string>
+    <string name="filter_news">News</string>
+    <string name="filter_movies">Movies</string>
+    <string name="filter_kids">Kids</string>
+    <string name="hd_badge">HD</string>
+    <string name="watch_on">Watch on Fire TV Recast | %1$s</string>
+</resources>
