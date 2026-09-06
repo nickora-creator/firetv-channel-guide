@@ -9,6 +9,7 @@ import kotlin.random.Random
 
 /**
  * Generates sample OTA-style EPG relative to "now".
+ * Leads with confirmed Recast channels 2.1 / 2.2; other rows are generic OTA placeholders.
  * ~10 channels × ~10 days of half-hour / hour blocks.
  */
 object SampleEpgData {
@@ -55,7 +56,6 @@ object SampleEpgData {
                 }
                 cursor = end
             }
-            // Ensure at least some variety: inject a known "live now" style show near now
             if (index == 0) {
                 // no-op; generation already covers now
             }
@@ -69,19 +69,51 @@ object SampleEpgData {
         )
     }
 
+    /**
+     * Confirmed on-device Recast: 2.1 and 2.2 first.
+     * Remaining rows are generic OTA placeholders (not tied to a specific DMA).
+     */
     private fun sampleChannels(): List<Channel> = listOf(
-        Channel("ch-cbs", "4.1", "WCCO", "WCCO-TV", "CBS", favorite = true, categories = setOf("News", "Sports", "TV Shows")),
-        Channel("ch-abc", "5.1", "KSTP", "KSTP-TV", "ABC", favorite = true, categories = setOf("News", "TV Shows")),
-        Channel("ch-nbc", "11.1", "KARE", "KARE 11", "NBC", favorite = true, categories = setOf("News", "Sports", "TV Shows")),
-        Channel("ch-fox", "9.1", "KMSP", "FOX 9", "FOX", favorite = true, categories = setOf("News", "Sports", "TV Shows")),
-        Channel("ch-pbs", "2.1", "TPT", "Twin Cities PBS", "PBS", favorite = true, categories = setOf("Kids", "TV Shows", "Movies")),
-        Channel("ch-cw", "23.1", "WUCW", "The CW Twin Cities", "CW", favorite = false, categories = setOf("TV Shows", "Sports")),
-        Channel("ch-ion", "45.1", "KPXM", "ION", "ION", favorite = false, categories = setOf("TV Shows", "Movies")),
-        Channel("ch-me", "4.2", "COZI", "Cozi TV", "Cozi", favorite = false, categories = setOf("TV Shows", "Movies")),
-        Channel("ch-create", "2.2", "CREATE", "Create", "PBS", favorite = false, categories = setOf("TV Shows")),
-        Channel("ch-kids", "2.3", "PBSK", "PBS Kids", "PBS Kids", favorite = true, categories = setOf("Kids")),
-        Channel("ch-indy", "41.1", "KPXM2", "Bounce", "Bounce", favorite = false, categories = setOf("TV Shows", "Movies")),
-        Channel("ch-weather", "9.2", "WX9", "FOX 9 Weather", "Weather", favorite = false, categories = setOf("News"))
+        Channel(
+            "ch-21", "2.1", "PBS", "Channel 2.1", "PBS",
+            favorite = true, categories = setOf("Kids", "TV Shows", "Movies")
+        ),
+        Channel(
+            "ch-22", "2.2", "CREATE", "Channel 2.2", "PBS",
+            favorite = true, categories = setOf("TV Shows")
+        ),
+        Channel(
+            "ch-41", "4.1", "CBS", "Channel 4.1", "CBS",
+            favorite = true, categories = setOf("News", "Sports", "TV Shows")
+        ),
+        Channel(
+            "ch-51", "5.1", "ABC", "Channel 5.1", "ABC",
+            favorite = true, categories = setOf("News", "TV Shows")
+        ),
+        Channel(
+            "ch-91", "9.1", "FOX", "Channel 9.1", "FOX",
+            favorite = true, categories = setOf("News", "Sports", "TV Shows")
+        ),
+        Channel(
+            "ch-111", "11.1", "NBC", "Channel 11.1", "NBC",
+            favorite = true, categories = setOf("News", "Sports", "TV Shows")
+        ),
+        Channel(
+            "ch-23", "2.3", "PBSK", "Channel 2.3", "PBS Kids",
+            favorite = false, categories = setOf("Kids")
+        ),
+        Channel(
+            "ch-42", "4.2", "COZI", "Channel 4.2", "Cozi",
+            favorite = false, categories = setOf("TV Shows", "Movies")
+        ),
+        Channel(
+            "ch-231", "23.1", "CW", "Channel 23.1", "CW",
+            favorite = false, categories = setOf("TV Shows", "Sports")
+        ),
+        Channel(
+            "ch-451", "45.1", "ION", "Channel 45.1", "ION",
+            favorite = false, categories = setOf("TV Shows", "Movies")
+        )
     )
 
     private data class Template(
@@ -172,7 +204,7 @@ object SampleEpgData {
 
         return when (channel.network) {
             "CBS", "ABC", "NBC", "FOX" -> listOf(news, news, drama, comedy, sports, paid, movie)
-            "PBS" -> if (channel.id == "ch-create") listOf(lifestyle, lifestyle, paid)
+            "PBS" -> if (channel.id == "ch-22") listOf(lifestyle, lifestyle, paid)
             else listOf(pbsDoc, kids, news, lifestyle, movie)
             "PBS Kids" -> listOf(kids, kids, kids)
             "Weather" -> listOf(weather)

@@ -3,6 +3,8 @@
     <string name="app_name">Channel Guide</string>
     <string name="recast_badge">Fire TV Recast</string>
     <string name="tune">Tune</string>
+    <string name="channel_up">Ch +</string>
+    <string name="channel_down">Ch −</string>
     <string name="record">Record</string>
     <string name="tune_stub">Tune (stub): %1$s on %2$s</string>
     <string name="record_stub">Record (stub): %1$s</string>

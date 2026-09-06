@@ -105,7 +105,7 @@
             android:layout_marginTop="6dp"
             android:textColor="@color/epg_accent_blue"
             android:textSize="13sp"
-            tools:text="Watch on Fire TV Recast | WCCO" />
+            tools:text="Watch on Fire TV Recast | PBS" />
     </LinearLayout>
 
     <!-- Filter pills -->
@@ -123,7 +123,7 @@
             android:orientation="horizontal" />
     </HorizontalScrollView>
 
-    <!-- Action row: Tune / Record -->
+    <!-- Action row: Ch − / Ch + / Record -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -132,13 +132,25 @@
         android:orientation="horizontal">
 
         <Button
-            android:id="@+id/btnTune"
+            android:id="@+id/btnChannelDown"
             android:layout_width="wrap_content"
             android:layout_height="40dp"
             android:background="@drawable/bg_filter_selected"
             android:focusable="true"
             android:minWidth="100dp"
-            android:text="@string/tune"
+            android:text="@string/channel_down"
+            android:textAllCaps="false"
+            android:textColor="@color/epg_text_on_focus" />
+
+        <Button
+            android:id="@+id/btnChannelUp"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:layout_marginStart="12dp"
+            android:background="@drawable/bg_filter_selected"
+            android:focusable="true"
+            android:minWidth="100dp"
+            android:text="@string/channel_up"
             android:textAllCaps="false"
             android:textColor="@color/epg_text_on_focus" />
 

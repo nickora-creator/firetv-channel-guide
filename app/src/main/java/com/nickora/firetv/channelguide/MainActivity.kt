@@ -24,7 +24,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Classic Fire TV Recast-style channel guide (sample EPG + Live TV tune).
+ * Classic Fire TV Recast-style channel guide (sample EPG + Live TV Ch+/Ch−).
  */
 class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
 
@@ -35,7 +35,8 @@ class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
     private lateinit var detailHd: TextView
     private lateinit var detailDescription: TextView
     private lateinit var detailWatchOn: TextView
-    private lateinit var btnTune: Button
+    private lateinit var btnChannelDown: Button
+    private lateinit var btnChannelUp: Button
     private lateinit var btnRecord: Button
     private lateinit var filterBar: LinearLayout
 
@@ -91,7 +92,8 @@ class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
         detailHd = findViewById(R.id.detailHd)
         detailDescription = findViewById(R.id.detailDescription)
         detailWatchOn = findViewById(R.id.detailWatchOn)
-        btnTune = findViewById(R.id.btnTune)
+        btnChannelDown = findViewById(R.id.btnChannelDown)
+        btnChannelUp = findViewById(R.id.btnChannelUp)
         btnRecord = findViewById(R.id.btnRecord)
         filterBar = findViewById(R.id.filterBar)
     }
@@ -163,25 +165,20 @@ class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
     }
 
     private fun wireActions() {
-        btnTune.setOnClickListener { tuneToFocused() }
+        btnChannelDown.setOnClickListener { recastTuner.channelDown() }
+        btnChannelUp.setOnClickListener { recastTuner.channelUp() }
         btnRecord.setOnClickListener { stubRecord() }
 
         // After buttons, push focus into grid on down
-        btnTune.setOnKeyListener { _, keyCode, event ->
-            if (event.action == android.view.KeyEvent.ACTION_DOWN &&
-                keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN
-            ) {
-                epgGuide.requestFocus()
-                true
-            } else false
-        }
-        btnRecord.setOnKeyListener { _, keyCode, event ->
-            if (event.action == android.view.KeyEvent.ACTION_DOWN &&
-                keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN
-            ) {
-                epgGuide.requestFocus()
-                true
-            } else false
+        listOf(btnChannelDown, btnChannelUp, btnRecord).forEach { button ->
+            button.setOnKeyListener { _, keyCode, event ->
+                if (event.action == android.view.KeyEvent.ACTION_DOWN &&
+                    keyCode == android.view.KeyEvent.KEYCODE_DPAD_DOWN
+                ) {
+                    epgGuide.requestFocus()
+                    true
+                } else false
+            }
         }
     }
 
@@ -195,7 +192,8 @@ class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
         focusedChannel = channel
         focusedProgram = program
         updateDetailPanel(channel, program)
-        tuneToFocused()
+        // Best-effort: open Live TV + CHANNEL_UP (no reliable direct numeric tune on Recast)
+        recastTuner.tune(channel)
     }
 
     private fun updateDetailPanel(channel: Channel, program: Program?) {
@@ -215,15 +213,6 @@ class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
         detailHd.visibility = if (program.hd) View.VISIBLE else View.GONE
         detailDescription.text = program.description
         detailWatchOn.text = getString(R.string.watch_on, channel.callSign)
-    }
-
-    private fun tuneToFocused() {
-        val ch = focusedChannel
-        if (ch == null) {
-            Toast.makeText(this, R.string.tune_no_channel, Toast.LENGTH_SHORT).show()
-            return
-        }
-        recastTuner.tune(ch)
     }
 
     private fun stubRecord() {
