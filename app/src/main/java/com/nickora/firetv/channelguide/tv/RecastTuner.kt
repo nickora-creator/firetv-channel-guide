@@ -5,17 +5,21 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.tv.TvContract
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.widget.Toast
 import com.nickora.firetv.channelguide.data.Channel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Maps guide channels to system TV provider rows (Recast / Hedwig preferred)
- * and tunes via Live TV VIEW intents.
+ * and tunes via Live TV VIEW intents, with digit-entry fallback
+ * (`input text` + DPAD_CENTER) when TvContract IDs are unavailable.
  */
 class RecastTuner(private val context: Context) {
 
@@ -43,6 +47,8 @@ class RecastTuner(private val context: Context) {
     private var lastError: String? = null
 
     private val loaded = AtomicBoolean(false)
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val shellExecutor = Executors.newSingleThreadExecutor()
 
     fun isLoaded(): Boolean = loaded.get()
 
@@ -155,11 +161,12 @@ class RecastTuner(private val context: Context) {
     }
 
     /**
-     * Tune to [channel] via Live TV. Returns true if an intent was started
-     * for a matched system channel; false if only a fallback / Toast path ran.
+     * Tune to [channel] via Live TV.
+     * Prefer TvContract VIEW when a system channel id matches (rare on 3P apps);
+     * otherwise open Live TV and inject channel digits via `input text` + DPAD_CENTER.
      *
-     * Fire OS package-locks Recast/Hedwig TvContract rows, so the common path
-     * is: miss → open Live TV player + show an Alexa phrase Nick can say aloud.
+     * @return true if a TvContract channel VIEW was started; false if digit-entry path ran
+     *         (or both VIEW and digit-entry failed to start).
      */
     fun tune(channel: Channel): Boolean {
         val systemId = resolveSystemChannelId(channel)
@@ -168,9 +175,8 @@ class RecastTuner(private val context: Context) {
                 startLiveTv(systemId)
                 true
             } catch (t: Throwable) {
-                Log.e(TAG, "Failed to start Live TV for channelId=$systemId", t)
-                showAlexaTuneHint(channel)
-                launchLiveTvFallback()
+                Log.e(TAG, "Failed to start Live TV for channelId=$systemId; trying digit entry", t)
+                tuneViaDigitEntry(channel)
                 false
             }
         }
@@ -181,26 +187,124 @@ class RecastTuner(private val context: Context) {
             byNumber.isEmpty() -> "No system TV channels found (Amazon locks Recast rows from 3P apps)"
             else -> "No Recast/Live TV match for ${channel.number} ${channel.callSign}"
         }
-        Log.w(TAG, "Tune miss: $reason")
-        showAlexaTuneHint(channel)
-        launchLiveTvFallback()
+        Log.w(TAG, "Tune miss (using digit entry): $reason")
+        tuneViaDigitEntry(channel)
         return false
     }
 
-    /** Toast text Nick can literally say to the Cube, e.g. "Alexa, tune to channel 4.1". */
-    fun alexaTunePhrase(channel: Channel): String {
-        val number = channel.number.trim()
-        return if (number.isNotEmpty()) {
-            "Alexa, tune to channel $number"
-        } else {
-            val name = channel.callSign.trim().ifEmpty { channel.name.trim() }
-            "Alexa, tune to $name"
+    /**
+     * Preferred Live TV entry form: dotted major.minor (e.g. `4.1`, `15-1` → `15.1`).
+     * Returns null if the number cannot be sanitized to digits / `.` / `-` only.
+     */
+    fun channelEntryNumber(channel: Channel): String? {
+        val raw = channel.number.trim()
+            .replace('\u2013', '-')
+            .replace('\u2014', '-')
+            .replace('–', '-')
+            .replace('—', '-')
+        if (raw.isEmpty()) return null
+        // Live TV likes dotted form; convert hyphen separators.
+        val preferred = if (raw.contains('-')) raw.replace('-', '.') else raw
+        return sanitizeChannelDigits(preferred)
+    }
+
+    /** Only digits, `.`, and `-` — never pass unsanitized strings to the shell. */
+    fun sanitizeChannelDigits(raw: String): String? {
+        if (raw.isEmpty()) return null
+        if (!raw.all { it.isDigit() || it == '.' || it == '-' }) return null
+        if (!raw.any { it.isDigit() }) return null
+        return raw
+    }
+
+    private fun tuneViaDigitEntry(channel: Channel) {
+        val entry = channelEntryNumber(channel)
+        if (entry == null) {
+            Log.w(TAG, "Digit entry aborted: unusable channel number '${channel.number}'")
+            showDigitEntryFailureToast()
+            launchLiveTvPlayer()
+            return
+        }
+
+        try {
+            launchLiveTvPlayer()
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to launch Live TV player before digit entry", t)
+            showDigitEntryFailureToast()
+            return
+        }
+
+        Log.i(TAG, "Digit entry scheduled for channel=$entry after ${DIGIT_ENTRY_DELAY_MS}ms")
+        mainHandler.postDelayed({
+            shellExecutor.execute {
+                val ok = injectChannelDigits(entry)
+                if (!ok) {
+                    mainHandler.post { showDigitEntryFailureToast() }
+                }
+            }
+        }, DIGIT_ENTRY_DELAY_MS)
+    }
+
+    /**
+     * Best-effort: `input text <number>` then `input keyevent 23` (DPAD_CENTER).
+     * Same trick as `adb shell input text` / Home Assistant Fire TV channel entry.
+     * Does not claim or require root — relies on debuggable app + adb input groups.
+     */
+    private fun injectChannelDigits(number: String): Boolean {
+        val safe = sanitizeChannelDigits(number)
+        if (safe == null) {
+            Log.e(TAG, "Refusing to inject unsanitized channel digits: '$number'")
+            return false
+        }
+
+        val textOk = runShellCommand(arrayOf("input", "text", safe))
+        if (!textOk) {
+            // Fallback via sh -c with already-sanitized token only
+            val textOkSh = runShellCommand(arrayOf("sh", "-c", "input text $safe"))
+            if (!textOkSh) return false
+        }
+
+        // Brief pause so Live TV registers the typed digits before confirm
+        try {
+            Thread.sleep(350L)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+
+        val keyOk = runShellCommand(arrayOf("input", "keyevent", "23"))
+        if (!keyOk) {
+            return runShellCommand(arrayOf("sh", "-c", "input keyevent 23"))
+        }
+        return true
+    }
+
+    private fun runShellCommand(argv: Array<String>): Boolean {
+        return try {
+            val pb = ProcessBuilder(*argv)
+            pb.redirectErrorStream(false)
+            val process = pb.start()
+            val stdout = process.inputStream.bufferedReader().use { it.readText() }
+            val stderr = process.errorStream.bufferedReader().use { it.readText() }
+            val code = process.waitFor()
+            Log.i(
+                TAG,
+                "shell argv=${argv.joinToString(" ")} exit=$code stdout=${stdout.trim()} stderr=${stderr.trim()}"
+            )
+            if (stderr.isNotBlank()) {
+                Log.w(TAG, "shell stderr: ${stderr.trim()}")
+            }
+            code == 0
+        } catch (t: Throwable) {
+            Log.e(TAG, "shell exec failed argv=${argv.joinToString(" ")}", t)
+            false
         }
     }
 
-    private fun showAlexaTuneHint(channel: Channel) {
-        val phrase = alexaTunePhrase(channel)
-        Toast.makeText(context, phrase, Toast.LENGTH_LONG).show()
+    private fun showDigitEntryFailureToast() {
+        Toast.makeText(
+            context,
+            "Couldn't send channel keys — is ADB debugging still on?",
+            Toast.LENGTH_LONG
+        ).show()
     }
 
     fun resolveSystemChannelId(channel: Channel): Long? {
@@ -251,23 +355,30 @@ class RecastTuner(private val context: Context) {
         Log.i(TAG, "Started Live TV VIEW for $uri component=${intent.component}")
     }
 
-    private fun launchLiveTvFallback() {
+    /** Open Live TV player with ACTION_VIEW (no channel URI) for digit entry. */
+    private fun launchLiveTvPlayer() {
         try {
-            val launch = if (isLiveTvAliasResolvable()) {
-                Intent().apply {
+            if (isLiveTvAliasResolvable()) {
+                val intent = Intent(Intent.ACTION_VIEW).apply {
                     component = ComponentName(LIVE_TV_PACKAGE, LIVE_TV_ACTIVITY)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
-            } else {
-                context.packageManager.getLeanbackLaunchIntentForPackage(LIVE_TV_PACKAGE)
-                    ?: context.packageManager.getLaunchIntentForPackage(LIVE_TV_PACKAGE)
+                context.startActivity(intent)
+                Log.i(TAG, "Launched Live TV player for digit entry")
+                return
             }
+            val launch = context.packageManager.getLeanbackLaunchIntentForPackage(LIVE_TV_PACKAGE)
+                ?: context.packageManager.getLaunchIntentForPackage(LIVE_TV_PACKAGE)
             if (launch != null) {
                 launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 context.startActivity(launch)
+                Log.i(TAG, "Launched Live TV package leanback/launch intent")
+            } else {
+                Log.w(TAG, "No resolvable Live TV launch intent")
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "Live TV fallback launch failed", t)
+            Log.w(TAG, "Live TV player launch failed", t)
+            throw t
         }
     }
 
@@ -285,6 +396,8 @@ class RecastTuner(private val context: Context) {
         private const val LIVE_TV_PACKAGE = "com.amazon.tv.livetv"
         private const val LIVE_TV_ACTIVITY = "com.amazon.tv.livetv.TvChannelsPlayerActivityAlias"
         private const val HEDWIG_HINT = "hedwig"
+        /** Wait for Live TV to resume before injecting digits (~1.5–2.5s). */
+        private const val DIGIT_ENTRY_DELAY_MS = 2000L
 
         /** Normalize "4.1", "4-1", "04.1" → comparable key. */
         fun normalizeNumber(raw: String): String {

@@ -2,7 +2,7 @@
 
 Sideloadable Android TV / Fire TV app that recreates the **classic Fire TV Recast channel guide**: a dense multi-day **channel × time** timeline EPG grid (not the newer On Now / Up Next layout).
 
-**v1.0.1** uses **sample OTA-style EPG data** for the grid, but **Tune** opens real **Live TV / Recast** via the system TV provider (`TvContract`) and Amazon Live TV player intent.
+**v1.0.3** uses **sample OTA-style EPG data** for the grid. **Tune** prefers a `TvContract` Live TV VIEW when a system channel id is visible; otherwise it opens Live TV and injects channel digits (`input text` + DPAD_CENTER) — the same pattern as `adb shell input text`.
 
 Target device: **Fire TV Cube (3rd gen)** and other Fire TV / Android TV boxes (leanback launcher).
 
@@ -13,7 +13,7 @@ Target device: **Fire TV Cube (3rd gen)** and other Fire TV / Android TV boxes (
 - Program cells sized by duration across ~10 days of sample schedule
 - Top detail panel (title, time range, rating, HD, description)
 - Filter pills: All / Favorites / Sports / News / Movies / Kids / TV Shows
-- **Tune** — matches the focused guide channel to a system TV channel (prefer Recast/Hedwig `input_id`) by `display_number` (with callSign/name fallback), then starts Live TV: `ACTION_VIEW` on `content://android.media.tv/channel/<id>` (explicit `com.amazon.tv.livetv/.TvChannelsPlayerActivityAlias` when resolvable)
+- **Tune** — prefers `TvContract` Live TV VIEW when a system id is visible; otherwise opens Live TV and injects channel digits (`input text` + DPAD_CENTER)
 - **Record** remains a stub (Toast)
 - Dark theme aligned with classic Recast guide aesthetics
 
@@ -106,17 +106,28 @@ adb shell am start -n com.nickora.firetv.channelguide/.MainActivity
 1. On launch, `RecastTuner` queries `TvContract.Channels.CONTENT_URI` for `_ID`, display number/name, `input_id`, browsable.
 2. Prefers rows whose `input_id` contains `hedwig` (Recast TV input), falling back to any browsable match.
 3. Builds a map keyed by normalized display number (`4.1` / `4-1` → same key).
-4. On Tune / program select: resolve guide `Channel.number` (then callSign/name) → system channel id →  
-   `am`-equivalent: `ACTION_VIEW` + `content://android.media.tv/channel/<ID>` targeting Live TV when possible.
-5. **Failure modes**: missing TV listings permission, empty provider, or no number/name match → Toast with reason; optionally still opens Live TV without a specific channel.
+4. On Tune / program select:
+   - **If a system channel id matches** (rare for third-party apps on Fire OS): `ACTION_VIEW` + `content://android.media.tv/channel/<ID>` targeting Live TV.
+   - **Else (usual path)**: launch `com.amazon.tv.livetv/.TvChannelsPlayerActivityAlias` with `ACTION_VIEW` (no channel URI), wait ~2s, then best-effort shell:
+     - `input text <number>` (sanitized digits / `.` / `-` only; hyphen form like `15-1` sent as `15.1`)
+     - `input keyevent 23` (DPAD_CENTER)
+   - Failure Toast only if digit injection fails: `Couldn't send channel keys — is ADB debugging still on?`
+5. Digit entry needs a **debuggable** install with ADB debugging enabled so the app can run `input` (same groups as `adb shell input`). No root.
 
-Sample guide numbers are Twin Cities–style and may not match every Recast lineup (e.g. WHRO/PBS). Matching is by **display number** (and name fallback), not hard-coded IDs — align sample numbers with your lineup for reliable hits.
+Sample guide numbers are Twin Cities–style — align them with your Recast lineup for the best experience.
 
-Shell reference (device):
+Shell reference (TvContract path):
 
 ```bash
 am start -a android.intent.action.VIEW -d content://android.media.tv/channel/<ID> \
   -n com.amazon.tv.livetv/.TvChannelsPlayerActivityAlias
+```
+
+Digit-entry equivalent (what the app injects after opening Live TV):
+
+```bash
+input text 4.1
+input keyevent 23
 ```
 
 ## Sample data
@@ -136,7 +147,7 @@ am start -a android.intent.action.VIEW -d content://android.media.tv/channel/<ID
 |------|--------|
 | Language | Kotlin |
 | UI | Custom `EpgGuideView` (Canvas) + AppCompat layouts — reliable dense bidirectional EPG on TV |
-| Tune | `RecastTuner` → `TvContract` + Live TV VIEW intent |
+| Tune | `RecastTuner` → `TvContract` VIEW, else Live TV + `input text` digit entry |
 | minSdk | 28 |
 | targetSdk / compileSdk | 34 |
 | Leanback | Manifest leanback launcher; touchscreen not required |
