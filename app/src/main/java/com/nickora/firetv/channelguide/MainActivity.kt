@@ -2,6 +2,7 @@ package com.nickora.firetv.channelguide
 
 import android.graphics.Typeface
 import android.os.Bundle
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
@@ -14,10 +15,16 @@ import androidx.core.content.ContextCompat
 import com.nickora.firetv.channelguide.data.Channel
 import com.nickora.firetv.channelguide.data.Program
 import com.nickora.firetv.channelguide.data.SampleEpgData
+import com.nickora.firetv.channelguide.tv.RecastTuner
 import com.nickora.firetv.channelguide.ui.EpgGuideView
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
- * Classic Fire TV Recast-style channel guide (sample EPG only).
+ * Classic Fire TV Recast-style channel guide (sample EPG + Live TV tune).
  */
 class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
 
@@ -32,6 +39,9 @@ class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
     private lateinit var btnRecord: Button
     private lateinit var filterBar: LinearLayout
 
+    private lateinit var recastTuner: RecastTuner
+    private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
     private var focusedChannel: Channel? = null
     private var focusedProgram: Program? = null
     private var selectedFilter = "All"
@@ -44,14 +54,33 @@ class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        recastTuner = RecastTuner(applicationContext)
+
         bindViews()
         buildFilterPills()
         wireActions()
+        loadSystemChannels()
 
         val guide = SampleEpgData.build(days = 10)
         epgGuide.listener = this
         epgGuide.setGuide(guide)
         epgGuide.requestFocus()
+    }
+
+    override fun onDestroy() {
+        activityScope.cancel()
+        super.onDestroy()
+    }
+
+    private fun loadSystemChannels() {
+        activityScope.launch {
+            val result = recastTuner.loadChannelMap()
+            Log.i(
+                TAG,
+                "System TV channel map: count=${result.count} error=${result.error} " +
+                    "samples=${result.samples}"
+            )
+        }
     }
 
     private fun bindViews() {
@@ -134,7 +163,7 @@ class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
     }
 
     private fun wireActions() {
-        btnTune.setOnClickListener { stubTune() }
+        btnTune.setOnClickListener { tuneToFocused() }
         btnRecord.setOnClickListener { stubRecord() }
 
         // After buttons, push focus into grid on down
@@ -166,7 +195,7 @@ class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
         focusedChannel = channel
         focusedProgram = program
         updateDetailPanel(channel, program)
-        stubTune()
+        tuneToFocused()
     }
 
     private fun updateDetailPanel(channel: Channel, program: Program?) {
@@ -188,15 +217,13 @@ class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
         detailWatchOn.text = getString(R.string.watch_on, channel.callSign)
     }
 
-    private fun stubTune() {
+    private fun tuneToFocused() {
         val ch = focusedChannel
-        val prog = focusedProgram
-        val msg = if (ch != null && prog != null) {
-            getString(R.string.tune_stub, prog.title, "${ch.number} ${ch.callSign}")
-        } else {
-            getString(R.string.tune)
+        if (ch == null) {
+            Toast.makeText(this, R.string.tune_no_channel, Toast.LENGTH_SHORT).show()
+            return
         }
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        recastTuner.tune(ch)
     }
 
     private fun stubRecord() {
@@ -215,4 +242,8 @@ class MainActivity : AppCompatActivity(), EpgGuideView.Listener {
             value.toFloat(),
             resources.displayMetrics
         ).toInt()
+
+    companion object {
+        private const val TAG = "ChannelGuide"
+    }
 }

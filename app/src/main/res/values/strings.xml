@@ -6,6 +6,7 @@
     <string name="record">Record</string>
     <string name="tune_stub">Tune (stub): %1$s on %2$s</string>
     <string name="record_stub">Record (stub): %1$s</string>
+    <string name="tune_no_channel">Select a channel first</string>
     <string name="no_program">No program</string>
     <string name="filter_all">All</string>
     <string name="filter_favorites">Favorites</string>
